@@ -1,0 +1,88 @@
+---
+title: "Trabajo Práctico - MMA"
+author: "Eleno Juliana - Ovando Francisco"
+format: html
+---
+```{r}
+library(tidyverse)
+library(survey)
+library(sampling)
+
+datos <- read.csv("sarndal.txt", sep="")
+datos <- datos %>% mutate(TYPE = factor((rep(c("H","M","M","M","H"),length=284))))
+```
+
+```{r}
+set.seed(2)
+clusters <- sampling::cluster(
+  data = datos,
+  size = 10,
+  clustername = c("CL"),
+  method = "srswor"
+)
+
+muestra <- getdata(datos, clusters)
+```
+
+
+```{r}
+diseno <- svydesign(data = muestra, id = ~ CL, fpc = ~ Prob)
+```
+
+
+```{r}
+total <- svytotal(~RMT85, design = diseno)
+cv(total)
+```
+
+
+```{r}
+pop_totals <- table(datos$TYPE)
+names(pop_totals) <- c("TYPEH", "TYPEM")
+diseno_cal <- calibrate(design = diseno, ~ TYPE - 1, population = pop_totals)
+
+total_cal <- svytotal( ~ RMT85, diseno_cal)
+cv(total_cal)
+```
+
+
+```{r}
+pesos <- data.frame(type = diseno_cal$variables$TYPE, w = weights(diseno_cal))
+pesos %>% group_by(type) %>% summarise(w = sum(w))
+
+svytable(~TYPE, diseno_cal)
+```
+```{r}
+diseno_cal2 <- calibrate(
+  design = diseno,
+  formula = ~ TYPE - 1,
+  population = pop_totals,
+  aggregate = TRUE  # fuerza mismo ajuste dentro del conglomerado
+)
+
+total_cal2 <- svytotal(~RMT85, diseno_cal2)
+cv(total_cal2)
+```
+```{r}
+pesos2 <- data.frame(CL = diseno_cal2$variables$CL,
+                     w = weights(diseno_cal2))
+pesos2 %>% group_by(CL) %>% summarise(min = min(w), max = max(w))
+```
+
+
+```{r}
+cor(datos$RMT85, datos$ME84)
+cor(datos$RMT85, datos$CS82)
+```
+
+```{r}
+datos %>% 
+ggplot(aes(x = ME84, y = RMT85)) +
+  geom_point()
+
+datos %>% 
+ggplot(aes(x = CS82, y = RMT85)) +
+  geom_point()
+```
+
+
