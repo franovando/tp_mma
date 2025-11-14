@@ -52,6 +52,7 @@ pesos %>% group_by(type) %>% summarise(w = sum(w))
 
 svytable(~TYPE, diseno_cal)
 ```
+
 ```{r}
 diseno_cal2 <- calibrate(
   design = diseno,
@@ -63,6 +64,7 @@ diseno_cal2 <- calibrate(
 total_cal2 <- svytotal(~RMT85, diseno_cal2)
 cv(total_cal2)
 ```
+
 ```{r}
 pesos2 <- data.frame(CL = diseno_cal2$variables$CL,
                      w = weights(diseno_cal2))
@@ -85,4 +87,80 @@ ggplot(aes(x = CS82, y = RMT85)) +
   geom_point()
 ```
 
+
+```{r}
+tot_ME84 <- sum(datos$ME84)
+diseno_cal3 <- calibrate(
+  design = diseno,
+  formula = ~ ME84 - 1,
+  population = tot_ME84,
+  aggregate = TRUE
+)
+
+total_cal3 <- svytotal(~RMT85, diseno_cal3)
+cv3 <- cv(total_cal3)
+```
+
+
+```{r}
+tot_CS82 <- sum(datos$CS82)
+diseno_cal4 <- calibrate(
+  design = diseno,
+  formula = ~ CS82 - 1,
+  population = tot_CS82,
+  aggregate = TRUE
+)
+
+total_cal4 <- svytotal(~RMT85, diseno_cal4)
+cv4 <- cv(total_cal4)
+```
+
+
+```{r}
+tot_ambas <- c(tot_ME84, tot_CS82)
+names(tot_ambas) <- c("ME84", "CS82")
+
+diseno_cal5 <- calibrate(
+  design = diseno,
+  formula = ~ CS82 + ME84 - 1,
+  population = tot_ambas,
+  aggregate = TRUE
+)
+
+total_cal5 <- svytotal(~RMT85, diseno_cal5)
+cv5 <- cv(total_cal5)
+```
+
+
+```{r}
+# Mostrar resumen
+resultados <- data.frame(
+  metodo = c("solo_ME84", "solo_CS82", "ambas"),
+  total = c(coef(total_cal3), coef(total_cal4), coef(total_cal5)),
+  SE = sqrt(c(vcov(total_cal3), vcov(total_cal4), vcov(total_cal5))),
+  cv = c(cv3, cv4, cv5)
+)
+
+resultados
+svytotal(~ME84, diseno_cal5)
+svytotal(~CS82, diseno_cal5)
+```
+
+```{r}
+tot_final <- c(113, 171, tot_ME84)
+names(tot_final) <- c('TYPEH', 'TYPEM', 'ME84')
+
+diseno_cal_final <- calibrate(
+  design = diseno,
+  formula = ~ ME84 + TYPE - 1,
+  population = tot_final,
+  aggregate = TRUE
+)
+
+diseno_cal_final
+
+
+total_final <- svytotal(~ RMT85, diseno_cal_final)
+cv(total_final)
+```
 
