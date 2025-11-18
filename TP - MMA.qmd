@@ -1,15 +1,41 @@
 ---
 title: "Trabajo Práctico - MMA"
 author: "Eleno Juliana - Ovando Francisco"
-format: html
+format: 
+  html:
+    theme: journal 
+    self-contained: true
+    toc: true
+    toc-depth: 2
+    include-in-header:
+      text: |
+        <style>
+          p {
+            text-align: justify;
+          }
+        </style>
+editor: visual
+lang: es
 ---
+## Introducción
 
-En primer lugar se carga la base de datos y se define la variable TYPE como un factor que clasifica a las unidades en dos grupos. Luego se selecciona la muestra por conglomerados utilizando el método *srswor*, tomando 10 clusters (cantidad equivalente al $20\%$ de los conglomerados) de manera aleatoria. Con esa muestra se define el diseño muestral en *survey*.
+El presente trabajo aborda la estimación de totales poblacionales a partir de una muestra compleja, utilizando como referencia la población `MU284`. El objetivo principal se centra en la estimación del total de la variable `RMT85`.
 
-```{r}
+```{r setup, include=FALSE}
+# Configuración global para que no salgan warnings ni mensajes en el reporte final
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Muestreo y definición del diseño
+
+En primer lugar se carga la base de datos y se define la variable TYPE como un factor que clasifica a las unidades en dos grupos. Luego se selecciona la muestra simple al azar sin reposición de conglomerados, tomando 10 clusters (cantidad equivalente al $20\%$ de los conglomerados) de manera aleatoria. Con esa muestra se define el diseño muestral en `survey`.
+
+```{r, include=FALSE}
 library(tidyverse)
 library(survey)
 library(sampling)
+library(knitr) # Necesario para tablas presentables
+library(kableExtra)
 
 datos <- read.csv("sarndal.txt", sep="")
 datos <- datos %>% mutate(TYPE = factor((rep(c("H","M","M","M","H"),length=284))))
@@ -25,20 +51,31 @@ clusters <- sampling::cluster(
 )
 
 muestra <- getdata(datos, clusters)
-```
-
-```{r}
 diseno <- svydesign(data = muestra, id = ~ CL, fpc = ~ Prob)
 ```
 
-A partir del diseño original se estima el total poblacional de RMT85 y su error estándar mediante *svytotal* y se calcula su coeficiente de variación.
+## Estimación del total
+
+A partir del diseño original se estima el total poblacional de `RMT85` y su error estándar mediante `svytotal` y se calcula su coeficiente de variación.
 
 ```{r}
 total <- svytotal(~RMT85, design = diseno)
-total
-cv(total)
 ```
-Luego, se realiza la calibración usando la variable auxiliar TYPE, para forzar que la distribución de la muestra refleje los totales poblacionales conocidos de cada categoría. 
+
+```{r, echo=FALSE}
+# Presentación de resultados en tabla usando kableExtra
+res_base <- data.frame(
+  Estimación = as.numeric(coef(total)),
+  SE = as.numeric(SE(total)),
+  CV = as.numeric(cv(total))
+)
+kable(res_base, digits = 2, caption = "Estimación inicial sin calibrar") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+## Calibración usando la variable `TYPE`
+
+Luego, se realiza la calibración usando la variable auxiliar `TYPE`, para forzar que la distribución de la muestra refleje los totales poblacionales conocidos de cada categoría. 
 
 ```{r}
 pop_totals <- table(datos$TYPE)
@@ -46,18 +83,28 @@ names(pop_totals) <- c("TYPEH", "TYPEM")
 diseno_cal <- calibrate(design = diseno, ~ TYPE - 1, population = pop_totals)
 
 total_cal <- svytotal( ~ RMT85, diseno_cal)
-total_cal
-cv(total_cal)
 ```
 
-```{r}
-pesos <- data.frame(type = diseno_cal$variables$TYPE, w = weights(diseno_cal))
-pesos %>% group_by(type) %>% summarise(w = sum(w))
-
-svytable(~TYPE, diseno_cal)
+```{r, echo=FALSE}
+# Tabla de resultados
+res_cal1 <- data.frame(
+  Estimación = as.numeric(coef(total_cal)),
+  SE = as.numeric(SE(total_cal)),
+  CV = as.numeric(cv(total_cal))
+)
+kable(res_cal1, digits = 2, caption = "Estimación calibrada por TYPE") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
 ```
 
-Tal como se espera teóricamente, el coeficiente de variación del estimador se redujo, mostrando que incorporar información auxiliar ya conocida mejora la eficiencia del diseño.
+El coeficiente de variación del estimador se redujo, mostrando que incorporar información auxiliar ya conocida mejora la eficiencia del diseño.
+
+```{r, echo=FALSE}
+svytable(~TYPE, diseno_cal) %>%
+  as.data.frame() %>%
+  setNames(c("TYPE", "Total")) %>% # Renombra la columna de frecuencias/totales
+  kable(caption = "Tabla ponderada por TYPE") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
 
 También, se prueba la calibración imponiendo `aggregate = TRUE`, que obliga a que el ajuste sea el mismo dentro de cada conglomerado, evitando diferencias excesivas entre pesos dentro del mismo grupo.
 
@@ -66,41 +113,72 @@ diseno_cal2 <- calibrate(design = diseno, formula = ~ TYPE - 1,
                          population = pop_totals, aggregate = TRUE)
 
 total_cal2 <- svytotal(~RMT85, diseno_cal2)
-total_cal2
-cv(total_cal2)
+```
+
+```{r, echo=FALSE}
+res_cal2 <- data.frame(
+  Estimación = as.numeric(coef(total_cal2)),
+  SE = as.numeric(SE(total_cal2)),
+  CV = as.numeric(cv(total_cal2))
+)
+kable(res_cal2, digits = 2, caption = "Calibración por TYPE con aggregate = TRUE") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
 ```
 
 ```{r}
 pesos2 <- data.frame(CL = diseno_cal2$variables$CL,
                      w = weights(diseno_cal2))
-pesos2 %>% group_by(CL) %>% summarise(min = min(w), max = max(w))
+res_pesos2 <- pesos2 %>% group_by(CL) %>% summarise(min = min(w), max = max(w))
 ```
 
-Para elegir una variable auxiliar numérica se analiza la correlación entre RMT85 y las variables ME84 y CS82. También se observan los gráficos de dispersión.
-
-```{r}
-cor(datos$RMT85, datos$ME84)
-cor(datos$RMT85, datos$CS82)
+```{r, echo=FALSE}
+kable(res_pesos2, digits = 2, caption = "Rango de pesos por Cluster") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
 ```
 
-```{r}
+## Calibración usando variables auxiliares numéricas
+
+Para elegir una variable auxiliar numérica se analiza la correlación entre `RMT85` y las variables `ME84` y `CS82`. También se observan los gráficos de dispersión.
+
+```{r, echo=FALSE}
+correlaciones <- data.frame(
+  Variable = c("ME84", "CS82"),
+  Correlación = c(cor(datos$RMT85, datos$ME84), cor(datos$RMT85, datos$CS82))
+)
+
+kable(correlaciones, digits = 3, caption = "Correlación con la variable de interés") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+```{r, echo=FALSE}
+# Gráfico 1: ME84 vs RMT85
 datos %>% 
 ggplot(aes(x = ME84, y = RMT85)) +
-  geom_point()
+  geom_point(alpha = 0.6, color = "darkblue") +
+  theme_bw() + # Uso de theme_bw solicitado
+  labs(title = "Relación entre ME84 y RMT85",
+       x = "ME84",
+       y = "RMT85")
 
+# Gráfico 2: CS82 vs RMT85
 datos %>% 
 ggplot(aes(x = CS82, y = RMT85)) +
-  geom_point()
+  geom_point(alpha = 0.6, color = "darkred") +
+  theme_bw() + # Uso de theme_bw solicitado
+  labs(title = "Relación entre CS82 y RMT85",
+       x = "CS82",
+       y = "RMT85")
 ```
-En este caso, ME84 muestra una asociación más fuerte con RMT85, por lo que se considera una mejor candidata para calibrar.
+
+En este caso, `ME84` muestra una asociación más fuerte con `RMT85`, por lo que se considera una mejor candidata para calibrar.
 
 Entonces, a continuación, se prueban otras tres calibraciones:
 
-- Usando solo ME84.
-- Usando solo CS82.
+- Usando solo `ME84`
+- Usando solo `CS82`.
 - Usando ambas variables simultáneamente.
 
-En cada caso se estima el total de RMT85, el error estándar, y se calcula el CV.
+En cada caso se estima el total de `RMT85`, el error estándar, y se calcula el CV.
 
 ```{r}
 tot_ME84 <- sum(datos$ME84)
@@ -143,21 +221,23 @@ total_cal5 <- svytotal(~RMT85, diseno_cal5)
 cv5 <- cv(total_cal5)
 ```
 
-```{r}
+```{r, echo=FALSE}
 resultados <- data.frame(
-  metodo = c("solo_ME84", "solo_CS82", "ambas"),
-  total = c(coef(total_cal3), coef(total_cal4), coef(total_cal5)),
-  SE = sqrt(c(vcov(total_cal3), vcov(total_cal4), vcov(total_cal5))),
-  cv = c(cv3, cv4, cv5)
+  Calibración = c("Sin calibrar","ME84", "CS82", "ME84+CS82"),
+  Total = c(as.numeric(coef(total)), as.numeric(coef(total_cal3)), as.numeric(coef(total_cal4)), as.numeric(coef(total_cal5))),
+  SE = c(as.numeric(SE(total)), as.numeric(SE(total_cal3)), as.numeric(SE(total_cal4)), as.numeric(SE(total_cal5))),
+  CV = c(as.numeric(cv(total)), cv3, cv4, cv5)
 )
 
-resultados
-svytotal(~ME84, diseno_cal5)
-svytotal(~CS82, diseno_cal5)
+kable(resultados %>% arrange(CV), digits = 3, caption = "Comparación de métodos de calibración numérica") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
 ```
-Los resultados muestran que calibrar con ME84 reduce más el CV que hacerlo con CS82, coherente con la correlación observada. Se observa también que usar ambas variables simultáneamente produce una reducción de variancia similar a utilizar solo ME84.
 
-Finalmente, se incorpora simultáneamente los totales poblacionales de TYPE y el total conocido de ME84 en una única calibración. Esto combina información categórica y numérica dentro del diseño.
+Los resultados muestran que calibrar con `ME84` reduce más el CV que hacerlo con `CS82`, coherente con la correlación observada. Se observa también que usar ambas variables simultáneamente produce una reducción de variancia similar a utilizar solo `ME84`, pero en este caso es más óptimo utilizar a esta última como única variable auxiliar.
+
+## Calibración usando la variable `ME84` y `TYPE`
+
+Finalmente, se incorpora simultáneamente los totales poblacionales de `TYPE` y el total conocido de `ME84` en una única calibración. Esto combina información categórica y numérica dentro del diseño.
 
 ```{r}
 tot_final <- c(113, 171, tot_ME84)
@@ -170,14 +250,24 @@ diseno_cal_final <- calibrate(
   aggregate = TRUE
 )
 
-diseno_cal_final
-
-
 total_final <- svytotal(~ RMT85, diseno_cal_final)
-total_final
-cv(total_final)
 ```
 
-Este diseño mantiene el CV próximo a los observados para el diseño que considera sólo ME84 y el que considera CS82 y ME84 a la vez.
 
-En conclusión, comenzando desde un diseño por conglomerados relativamente simple, se fue incorporando información auxiliar mediante calibración para mejorar la precisión del estimador del total de RMT85. La calibración con la variable categórica permitió reducir la variabilidad, pero la mejora más importante se obtuvo al incluir variables numéricas relacionadas con la variable de interés, especialmente ME84, que mostró la mayor correlación y produjo el estimador más eficiente, mostrando cómo la incorporación adecuada de información auxiliar puede mejorar la calidad de las estimaciones sin necesidad de aumentar el tamaño muestral.
+```{r, echo=FALSE}
+res_final <- data.frame(
+  Calibración = "ME84 + TYPE",
+  Estimación = as.numeric(coef(total_final)),
+  SE = as.numeric(SE(total_final)),
+  CV = as.numeric(cv(total_final))
+)
+
+kable(res_final, digits = 2, caption = "Resultado del diseño de calibración final") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = F)
+```
+
+Este diseño mantiene el CV próximo a los observados para el diseño que considera sólo `ME84` y el que considera `CS82` y `ME84` a la vez.
+
+## Conclusiones
+
+En conclusión, comenzando desde un diseño por conglomerados relativamente simple, se fue incorporando información auxiliar mediante calibración para mejorar la precisión del estimador del total de `RMT85`. La calibración con la variable categórica permitió reducir la variabilidad, pero la mejora más importante se obtuvo al incluir variables numéricas relacionadas con la variable de interés, especialmente `ME84`, que mostró la mayor correlación y produjo el estimador más eficiente, mostrando cómo la incorporación adecuada de información auxiliar puede mejorar la calidad de las estimaciones sin necesidad de aumentar el tamaño muestral.
